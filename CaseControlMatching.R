@@ -1,5 +1,8 @@
 # Script for matching a set of cases and controls based on several co-variate factors
 # Matched by different co-variates, factors are weighted
+# This script will produce 192 samples, for assignment on to two epigenetic plates
+# The matched covariates are:
+# Age, Sex, Cigarettes (pack years), Alcohol (unit years), bmi, heartburn accumulation, PPI accumulation
 
 library(tibble)
 library(dplyr)
@@ -11,42 +14,42 @@ library(beepr)
 
 HOME_DIRECTORY <- "/Users/timothystone/Desktop/CaseControlMatches/"
 
-# INPUT FILES
+# Input Filelocations
+# fileIn contains a comprehensive set of covariate information
+# ID maps the "subject number" to the sample ids
 fileIn <- paste0(HOME_DIRECTORY, "PITDataDumpMar2020.csv")
 fileID <- paste0(HOME_DIRECTORY, "IDandGroups.csv")
 
-# OUTPUT FILES, CHANGE 
+# Output file locations
 fileOut <- paste0(HOME_DIRECTORY, "CASECONTROL.xls")
 filePlot <- paste0(HOME_DIRECTORY, "MATCH_PLOTS.xls")
 
 # WEIGHTS
+sexWeighting        <- 500
 ageWeighting        <- 300
-cigaretteWeighting  <- 100
-drinkWeighting      <-  50
+bmiWeighting        <- 300
 weightWeighting     <- 300
-waistWeighting      <- 300
 heartburnWeighting  <- 300
 PPIWeighting        <- 300
-sexWeighting        <- 500
-imcWeighting        <- 500
-bmiWeighting        <- 300
+cigaretteWeighting  <- 100
+drinkWeighting      <-  50
 
-# SWITCHES
+# Execution switches
 plotSwitch      <- FALSE
 
-# FILTER SWITCHES
+# Filter switches
 raceFilter      <- TRUE
 salivaFilter    <- TRUE
 lowGradeFilter  <- TRUE
 
-# CONSTANTS
+# Constants
 ACCEPTABLE_AGE_DIFFERENCE <- 11
 
-# INITIALISE MAIN VARIABLES
+# Initialise the looping variables
 matchedControl <- c()
 globalCount <- 1
 
-# FUNCTIONS
+# Functions
 
 normalise <- function(x, y=100) { x * y / max(x, na.rm=T) }
 
@@ -59,37 +62,34 @@ samples <- read.csv(filein, stringsAsFactors = F) %>% as_tibble()
 samples <- samples %>% mutate(age = ifelse(!is.na(Q_P_age) & Q_P_age > REG_ageConsent, Q_P_age, REG_ageConsent))
 
 # Database cleanup
-# Unfortunately, the database output has a lot of input problems and needs cleaning up
-# (I didn't design the database)
+# Sadly database input was not screened (I didn't design it)
+# People have entered text in numeric values
+# Choice of unit was either kg or stone/feet, this needs to be standardised to kg / m
+# The DataFrame needs to be cleaned and then coerced to a numeric format
+# What follows are therefore a set of cleanup regular expressions using gsub()
 
 samples <- samples %>% mutate(Q_P_weight_stones = gsub("(\\d+)(\\.\\d+)", "\\1", Q_P_weight_stones))
 samples <- samples %>% mutate(Q_P_weight_stones = gsub("\\D+", "", Q_P_weight_stones))
 samples <- samples %>% mutate(Q_P_weight_stones = as.numeric(Q_P_weight_stones))
 samples <- samples %>% mutate(Q_P_weight_stones =  ifelse(Q_P_weight_stones <6 , NA, Q_P_weight_stones))
-
 samples <- samples %>% mutate(Q_P_weight_pounds = gsub("(\\d+)(\\.\\d+)", "\\1", Q_P_weight_pounds))
 samples <- samples %>% mutate(Q_P_weight_pounds = gsub("\\D+", "", Q_P_weight_pounds))
 samples <- samples %>% mutate(Q_P_weight_stones = as.numeric(Q_P_weight_stones))
-
 samples <- samples %>% mutate(Q_P_weight_kg = gsub("(\\d+)(\\.\\d+)", "\\1", Q_P_weight_kg))
 samples <- samples %>% mutate(Q_P_weight_kg = gsub("\\D+", "", Q_P_weight_kg))
 samples <- samples %>% mutate(Q_P_weight_kg = as.numeric(Q_P_weight_kg))
-
 samples <- samples %>% mutate(Q_P_height_feet = gsub("(\\d+)(\\.\\d+)", "\\1", Q_P_height_feet))
 samples <- samples %>% mutate(Q_P_height_feet = gsub("\\D+", "", Q_P_height_feet))
 samples <- samples %>% mutate(Q_P_height_feet = as.numeric(Q_P_height_feet))
 samples <- samples %>% mutate(Q_P_height_inches = gsub("(\\d+)(\\.\\d+)", "\\1", Q_P_height_inches))
 samples <- samples %>% mutate(Q_P_height_inches = gsub("\\D+", "", Q_P_height_inches))
 samples <- samples %>% mutate(Q_P_height_inches = as.numeric(Q_P_height_inches))
-
 samples <- samples %>% mutate(Q_P_height_cm = gsub("(\\d+)(\\.\\d+)", "\\1", Q_P_height_cm))
 samples <- samples %>% mutate(Q_P_height_cm = as.numeric(Q_P_height_cm))
 samples <- samples %>% mutate(Q_P_height_cm = ifelse(Q_P_height_cm < 100, NA, Q_P_height_cm))
-
 samples <- samples %>% mutate(height = ifelse(grepl("\\d", Q_P_height_feet) & !grepl("\\d", Q_P_height_cm),
                                               round(as.numeric(Q_P_height_feet) * 30.48 + (as.numeric(Q_P_height_inches) * 2.54),2), NA))
 samples <- samples %>% mutate(height = ifelse(grepl("\\d", height), height, Q_P_height_cm))
-
 samples <- samples %>% mutate(weight = ifelse(grepl("\\d", Q_P_weight_stones) & !grepl("\\d", Q_P_weight_kg),
                                               round(as.numeric(Q_P_weight_stones) * 6.35029 + (as.numeric(Q_P_weight_pounds) * 0.453592),2), ""))
 samples <- samples %>% mutate(weight = ifelse(grepl("\\d", Q_P_weight_kg), Q_P_weight_kg, weight))
@@ -102,7 +102,9 @@ samples <- samples %>% filter(!is.na(weight))
 samples <- samples %>% mutate(bmi = ifelse(grepl("\\d", height) & grepl("\\d", weight), weight/(((height/100))^2), NA))
 samples <- left_join(IDandGroups, samples)
 
-# CALCULATE TOTAL ALCOHOL CONSUMPTION (unit years)
+# Calculation of alcohol consumption (unit years)
+# The questionnaire gives general time periods and average alcohol consumption by week
+# We can construct an analagous unit to the pack-year
 
 # These are the statistifcal Bins used for taking averages from the survey data
 ageBoundary <- c(17, 25, 35, 45, 59, 999)
@@ -111,21 +113,19 @@ averageUnits <- c(5, 15, 25, 35, 45)
 
 # Extract the alcohol-related fields from the large data-file
 alcoholNames <- colnames(samples[,grep("Q_ALC", colnames(samples))])[4:8]
-
-# 
 alcoholGreps <- c("teetotal", "light drinker", "moderate drinker", "very heavy drinker")
 
 # Initialise CumulAlc=0 in the samples DataFrame, we cannot match with NA so we need a value
 samples <- samples %>% mutate(CumulAlc = 0)
 ages <- select(samples, age) %>% unlist() 
 
-# .bincode is a Base R-function that takes a numeric vector and return integer codes for the binning.
+# NB:  .bincode is a Base R-function that takes a numeric vector and return integer codes for the binning.
 # DO NOT REMOVE THE INITAL DOT
 ageBins <- .bincode (ages, ageBoundary)
 unitsDrunk <- samples %>% select(CumulAlc) %>% unlist()
 
 # Alcohol Loop
-# loop through the bins, add up the accumulated drink years
+# loop through the bins, add up the accumulated drink years to get alcohol consumption to date
 for (i in 1:5) {
   drinkYears <- rep(0, length(unitsDrunk))
   drinkYears[which(ageBins == i)] <- ages[which(ageBins == i)] - ageBoundary[i]
@@ -137,9 +137,10 @@ for (i in 1:5) {
     unitsDrunk[whichUnits] <- unitsDrunk[whichUnits] + averageUnits[j] * drinkYears[whichUnits]
   }
 }
+# Add to the samples DataFrame
 samples <- mutate(samples, UnitsDrunk = unitsDrunk)
 
-# SMOKING
+# Cigarette consumption calculation, this is similar in execution to the alcohol consumption
 
 ageBoundary <- c(15, 25, 35, 45, 59, 999)
 ageRange <- c(10, 10, 10, 15)
@@ -212,7 +213,7 @@ samples <- mutate(samples, PPIprev = ifelse(PPIfreq == 0, PPIprev, 0))
 # Final PPI estimation value, a new PPI column is created for "PPI years"
 samples <- mutate(samples, PPI = (PPIfreq * PPIbeg) + (PPIprev * adultDoseLife))
 
-# HEARTBURN
+# Heartburn calculation
 # Heartburn does not have a beginning field, so we use only current frequency
 
 samples <- mutate(samples, hb = as.character(Q_HB_heartburn_previous_frequency))
@@ -258,17 +259,21 @@ everyone  <- filter(samples, !is.na(FinalDiagnosis))
 # Remove samples with missing gender OR age information
 everyone <-  filter(everyone, is.na(Gender) | is.na(age))
 
-# FILTERS
+# Apply Filters
+
+# Race filter
 if (raceFilter) {
   #Race Filter
   everyone <- filter(everyone, grepl("White", PINF_ethnicity) | grepl("White", Q_P_ethnicity) )
 }
 
+# Low-Grade Dysplasia filter
 if (lowGradeFilter) {
   #Low-grade Dysplasia Filter
   everyone <- filter(everyone, diagnosis != "Low Dys")
 }
 
+# Saliva Sample Filter
 if (salivaFilter) {
   # Only people with saliva samples
   everyone <- filter(everyone, grepl("aliva", QS_samples_collected))
@@ -297,7 +302,7 @@ everyone <- mutate(everyone, diagnosis = factor(diagnosis,
 cases     <- filter(everyone, Group == "Case")
 controls  <- filter(everyone, Group == "Controls")
 
-# OPTIONAL PLOTTING
+# Optional plotting of covariate data
 if (plotSwitch) {
   jpeg(filePlot)
   agevector <- c()
@@ -312,7 +317,7 @@ if (plotSwitch) {
   
 }
 
-## Normalise all the quantities
+## Normalise all the quantities, create new DataFrame quantities of the normalised quantities
 
 everyone <- everyone %>% mutate(Nweight = normalise (weight, weightWeighting))
 everyone <- everyone %>% mutate(NcigsSmoked = normalise (cigsSmoked, cigaretteWeighting))
